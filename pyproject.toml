@@ -1,0 +1,19 @@
+[project]
+name = "memealerts-award"
+version = "0.1.0"
+description = "Twitch channel points to MemeAlerts coins desktop bridge"
+requires-python = ">=3.11"
+dependencies = ["PySide6-Essentials>=6.8,<7", "keyring>=25,<26"]
+
+[project.optional-dependencies]
+build = ["pyinstaller>=6.12,<7", "Pillow>=11,<13"]
+
+[project.scripts]
+memealerts-award = "memeaward.desktop:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["memeaward*"]
