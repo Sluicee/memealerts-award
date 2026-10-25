@@ -43,8 +43,10 @@ def request(service, url, method="GET", body=None, headers=None, form=False):
 class Twitch:
     SCOPE = "channel:manage:redemptions user:write:chat"
 
-    def __init__(self, client_id, token):
+    def __init__(self, client_id, token, refresh_token="", on_refresh=None):
         self.client_id, self.token = client_id, token
+        self.refresh_token = refresh_token
+        self.on_refresh = on_refresh
         self.user_id = ""
 
     @staticmethod
@@ -58,9 +60,28 @@ class Twitch:
             "client_id": client_id, "device_code": device_code, "scopes": Twitch.SCOPE,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code"}, form=True)
 
+    def authorized_request(self, url, method="GET", body=None, validation=False):
+        def send():
+            headers = {"Authorization": f"{'OAuth' if validation else 'Bearer'} {self.token}",
+                       "Client-Id": self.client_id}
+            return request("Twitch", url, method, body, headers)
+
+        try:
+            return send()
+        except ApiError as exc:
+            if exc.status != 401 or not self.refresh_token:
+                raise
+        # Retry only a rejected authorization, never a timeout or an ambiguous write.
+        result = request("Twitch", "https://id.twitch.tv/oauth2/token", "POST", {
+            "client_id": self.client_id, "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token}, form=True)
+        self.token, self.refresh_token = result["access_token"], result["refresh_token"]
+        if self.on_refresh:
+            self.on_refresh(self.token, self.refresh_token)
+        return send()
+
     def validate(self):
-        data = request("Twitch", "https://id.twitch.tv/oauth2/validate",
-                       headers={"Authorization": f"OAuth {self.token}"})
+        data = self.authorized_request("https://id.twitch.tv/oauth2/validate", validation=True)
         if data.get("client_id") != self.client_id or not set(self.SCOPE.split()).issubset(data.get("scopes", [])):
             raise ValueError("Войдите в Twitch через браузер заново: нужны права управления наградами и отправки сообщений (channel:manage:redemptions, user:write:chat).")
         self.user_id = data["user_id"]
@@ -68,8 +89,8 @@ class Twitch:
 
     def call(self, path, method="GET", body=None, **query):
         query["broadcaster_id"] = self.user_id
-        return request("Twitch", "https://api.twitch.tv/helix/channel_points/" + path + "?" + urlencode(query),
-                       method, body, {"Authorization": f"Bearer {self.token}", "Client-Id": self.client_id})
+        return self.authorized_request("https://api.twitch.tv/helix/channel_points/" + path + "?" + urlencode(query),
+                                       method, body)
 
     def create_reward(self, title, cost, limits=None):
         result = self.call("custom_rewards", "POST", {
@@ -97,9 +118,8 @@ class Twitch:
                    "Перейдите на https://memealerts.com/ и станьте саппортером канала. "
                    "Если вы уже саппортер, проверьте ник MemeAlerts и повторите получение награды. "
                    "Баллы канала возвращены.")
-        result = request("Twitch", "https://api.twitch.tv/helix/chat/messages", "POST", {
-            "broadcaster_id": self.user_id, "sender_id": self.user_id, "message": message},
-            {"Authorization": f"Bearer {self.token}", "Client-Id": self.client_id})
+        result = self.authorized_request("https://api.twitch.tv/helix/chat/messages", "POST", {
+            "broadcaster_id": self.user_id, "sender_id": self.user_id, "message": message})
         if not isinstance(result, dict) or not result.get("data") or result["data"][0].get("is_sent") is not True:
             raise ValueError("Twitch не подтвердил отправку сообщения в чат.")
 

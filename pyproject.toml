@@ -1,6 +1,6 @@
 [project]
 name = "memealerts-award"
-version = "0.1.0"
+version = "0.1.1"
 description = "Twitch channel points to MemeAlerts coins desktop bridge"
 requires-python = ">=3.11"
 dependencies = ["PySide6-Essentials>=6.8,<7", "keyring>=25,<26"]

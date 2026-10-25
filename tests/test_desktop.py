@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 try:
     from memeaward.desktop import Worker
@@ -32,6 +32,35 @@ class DesktopTests(unittest.TestCase):
     def tearDown(self):
         self.worker.store.close()
         self.tmp.cleanup()
+
+    def test_rotated_session_is_saved_as_one_keyring_entry(self):
+        self.worker.remember = True
+        with patch("keyring.set_password") as save:
+            self.worker.update_twitch_session("new", "rotated")
+        import json
+        self.assertEqual(save.call_args.args[:2], ("memealerts-award", "twitch_session"))
+        self.assertEqual(json.loads(save.call_args.args[2]),
+                         {"access_token": "new", "refresh_token": "rotated"})
+
+    def test_session_without_remember_stays_in_memory(self):
+        with patch("keyring.set_password") as save:
+            self.worker.update_twitch_session("new", "rotated")
+        save.assert_not_called()
+        self.assertEqual(self.worker.twitch_session["refresh_token"], "rotated")
+
+    def test_device_login_keeps_refresh_token(self):
+        self.worker.device = {"next_poll": 0, "deadline": float("inf"), "interval": 5,
+                              "client_id": "client", "device_code": "code"}
+        with patch("memeaward.desktop.Twitch.device_poll", return_value={
+                "access_token": "access", "refresh_token": "refresh"}):
+            self.worker.poll_device()
+        self.assertEqual(self.worker.twitch_session,
+                         {"access_token": "access", "refresh_token": "refresh"})
+
+    def test_clear_tokens_includes_refresh_credentials(self):
+        with patch("keyring.get_password", return_value="saved"), patch("keyring.delete_password") as delete:
+            self.worker.clear_tokens()
+        self.assertIn((("memealerts-award", "twitch_session"),), delete.call_args_list)
 
     def test_stop_disables_remote_reward(self):
         self.worker.active = True
